@@ -51,7 +51,7 @@ resourcestring
 {.$DEFINE ms}     // Malay
 {.$DEFINE zh_CN}  // Chinese
 {.$DEFINE lo}     // Lao
-
+{.$DEFINE he}     // Hebrew
 
 
 {$IF defined(de)}
@@ -96,6 +96,9 @@ resourcestring
 {$ELSEIF defined(lo)}
   {$I lang_lo.inc}
 
+{$ELSEIF defined(he)}
+  {$I lang_he.inc}
+
 {$ELSE}
   {$I lang_en.inc}
 {$IFEND}
@@ -117,7 +120,7 @@ const
   FPG_CONFIG_DIR = 'fpgui_toolkit' + PathDelim;
   FPG_BOOKMARKS_FILE = 'bookmarks.ini';
   FPG_BOOKMARK_SECTION = 'bookmarks';
-  
+
   // Used for the internal message queue
   cMessageQueueSize = 2048;
 
@@ -134,6 +137,10 @@ const
   MIME_TEXT_URI_LIST = 'text/uri-list';
   MIME_OBJECT        = 'x-fpc-object';
 
+  { wordbreak symbols and whitespace. Skip '_' since its often used in
+    computery names. This treats all unicode chars above ASCII as "word"
+    chars. }
+  not_word = [#0..'/', ':'..'@', '['..'^', '`', '{'..'~'];
 
 implementation
 

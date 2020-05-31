@@ -28,7 +28,6 @@ interface
 uses
   Classes,
   SysUtils,
-  contnrs,
   X,
   Xlib,
   XUtil,
@@ -151,7 +150,7 @@ type
   protected
     property    Handle: PXftFont read FFontData;
   public
-    constructor Create(const afontdesc: string);
+    constructor Create(const afontdesc: string); override;
     destructor  Destroy; override;
     function    HandleIsValid: boolean;
     function    GetAscent: integer; override;
@@ -271,6 +270,25 @@ type
   end;
 
 
+  TfpgX11Selection = class(TfpgClipboardBase)
+  private
+    FWaitingForSelection: Boolean;
+    FOwnsSelection: Boolean;
+    xia_selection: TAtom;
+    xsa_manager: TfpgString;
+    procedure   SendClipboardToManager;
+    procedure   DoLostSelection;
+    procedure   DoSetTargets(AWin: TWindow; AProperty: TAtom);
+  protected
+    FClipboardText: TfpgString;
+    function    DoGetText: TfpgString; override;
+    procedure   DoSetText(const AValue: TfpgString); override;
+    procedure   InitClipboard; override;
+  public
+    destructor  Destroy; override;
+  end;
+
+
   TfpgX11Application = class(TfpgApplicationBase)
   private
     FComposeBuffer: TfpgString;
@@ -322,6 +340,7 @@ type
     DefaultColorMap: TColorMap;
     FRootWindow: TfpgWinHandle;
     xia_clipboard: TAtom;
+    xia_selection: TAtom;
     xia_motif_wm_hints: TAtom;
     xia_wm_protocols: TAtom;
     xia_wm_delete_window: TAtom;
@@ -336,36 +355,25 @@ type
     procedure   DoWaitWindowMessage(atimeoutms: integer); override;
     function    MessagesPending: boolean; override;
     function    GetHelpViewer: TfpgString; override;
+    procedure   DoFlush; override;
   public
     constructor Create(const AParams: string); override;
     destructor  Destroy; override;
-    procedure   DoFlush;
     function    GetScreenWidth: TfpgCoord; override;
     function    GetScreenHeight: TfpgCoord; override;
     function    GetScreenPixelColor(APos: TPoint): TfpgColor; override;
     function    Screen_dpi_x: integer; override;
     function    Screen_dpi_y: integer; override;
     function    Screen_dpi: integer; override;
-    property    Display: PXDisplay read FDisplay;
+    property    Display: PXDisplay read FDisplay; platform;
     property    RootWindow: TfpgWinHandle read FRootWindow; platform;
     property    EventFilter: TX11EventFilter read FEventFilter write FEventFilter; platform;
   end;
 
 
-  TfpgX11Clipboard = class(TfpgClipboardBase)
-  private
-    FWaitingForSelection: Boolean;
-    FOwnsSelection: Boolean;
-    procedure   SendClipboardToManager;
-    procedure   DoLostSelection;
-    procedure   DoSetTargets(AWin: TWindow; AProperty: TAtom);
+  TfpgX11Clipboard = class(TfpgX11Selection)
   protected
-    FClipboardText: TfpgString;
-    function    DoGetText: TfpgString; override;
-    procedure   DoSetText(const AValue: TfpgString); override;
     procedure   InitClipboard; override;
-  public
-    destructor  Destroy; override;
   end;
 
 
@@ -449,7 +457,7 @@ type
   end;
 
 
-  TfpgX11SystemTrayHandler = class(TfpgComponent)
+  TfpgX11SystemTrayHandler = class(TfpgSystemTrayHandlerBase)
   private
     FTrayIconParent: TWindow;
     FTrayWidget: TfpgWindowBase;
@@ -459,10 +467,10 @@ type
     property    TrayIconParent: TWindow read GetTrayIconParent;
   public
     constructor Create(AOwner: TComponent); override;
-    procedure   Show;
-    procedure   Hide;
-    function    IsSystemTrayAvailable: boolean;
-    function    SupportsMessages: boolean;
+    procedure   Show; override;
+    procedure   Hide; override;
+    function    IsSystemTrayAvailable: boolean; override;
+    function    SupportsMessages: boolean; override;
   end;
 
   {$IFDEF GDEBUG}
@@ -718,7 +726,12 @@ var
   actualtype: cint;
   count, remaining: culong;
   data: PChar;
+  clip: TfpgX11Selection;
 begin
+  if ev.xselection._property = xapplication.xia_selection then
+    clip := TfpgX11Selection(xapplication.selection)
+  else
+    clip := fpgClipboard;
   if ev.xselection._property > 0 then
   begin
     XGetWindowProperty(xapplication.Display, ev.xselection.requestor,
@@ -729,15 +742,15 @@ begin
         @data);
     s := data;
 
-    fpgClipboard.FClipboardText := s;
+    clip.FClipboardText := s;
     XFree(data);
   end
   else
   begin
-    fpgClipboard.FClipboardText := '';
+    clip.FClipboardText := '';
   end;
 
-  fpgClipboard.FWaitingForSelection := false;
+  clip.FWaitingForSelection := false;
 end;
 
 // clipboard event
@@ -761,7 +774,6 @@ var
   AtomPair: TAtomPair;
   r: cint;
 begin
-
   xia_Atom_Pair := XInternAtom(xapplication.Display, 'ATOM_PAIR', False);
 
   // find out how much data there is
@@ -791,15 +803,21 @@ begin
 end;
 
 procedure HandleAtom(var e: TXSelectionEvent; const Atom: TAtom; Prop: TAtom);
+var
+	clip: TfpgX11Selection;
 begin
   if Atom = None then
   begin
     Exit; // ==>
   end;
+  if e.selection = xapplication.xia_selection then
+    clip := TfpgX11Selection(xapplication.selection)
+  else
+    clip := fpgClipboard;
 
   if Atom = xapplication.xia_targets then
   begin
-    fpgClipboard.DoSetTargets(e.requestor, Prop);
+    clip.DoSetTargets(e.requestor, Prop);
   end
   else if Atom = XInternAtom(xapplication.Display, 'MULTIPLE', False) then
   begin
@@ -809,7 +827,7 @@ begin
   else// if Atom = XA_STRING then
   begin
     XChangeProperty(xapplication.Display, e.requestor, Prop, Atom,
-              8, PropModeReplace, PByte(@fpgClipboard.FClipboardText[1]), Length(fpgClipboard.FClipboardText));
+              8, PropModeReplace, PByte(@clip.FClipboardText[1]), Length(clip.FClipboardText));
   end;
   //else WriteLn('Unhandled Selection atom: ', XGetAtomName(xapplication.Display, Atom));
 end;
@@ -1568,6 +1586,7 @@ begin
 
   // Initialize atoms
   xia_clipboard         := XInternAtom(FDisplay, 'CLIPBOARD', TBool(False));
+  xia_selection         := XInternAtom(FDisplay, 'PRIMARY', TBool(False));
   xia_targets           := XInternAtom(FDisplay, 'TARGETS', TBool(False));
   xia_save_targets      := XInternAtom(FDisplay, 'SAVE_TARGETS', TBool(False));
   xia_motif_wm_hints    := XInternAtom(FDisplay, '_MOTIF_WM_HINTS', TBool(False));
@@ -1591,10 +1610,14 @@ begin
     Exit;
   FIsInitialized := True;
   xapplication := TfpgApplication(self);
+
+  // this needs to happen after the above global registration
+  FSelection := TfpgX11Selection.Create;
 end;
 
 destructor TfpgX11Application.Destroy;
 begin
+  FSelection.free;
   netlayer.Free;
   XCloseDisplay(FDisplay);
   inherited Destroy;
@@ -2080,10 +2103,13 @@ begin
         begin
           w := FindWindowByHandle(ev.xclient.window);
           if not Assigned(w) then
+          begin
             ReportLostWindow(ev);
+            exit;
+          end;
 
           // WM_PROTOCOLS message
-          if Assigned(w) and (ev.xclient.message_type = xia_wm_protocols) then
+          if (ev.xclient.message_type = xia_wm_protocols) then
           begin
             if (ev.xclient.data.l[0] = netlayer.NetAtom[naWM_PING]) then
             begin
@@ -2101,18 +2127,17 @@ begin
               end;
 
               if not blockmsg then
-                fpgPostMessage(nil, FindWindowByHandle(ev.xclient.window), FPGM_CLOSE);
+                fpgPostMessage(nil, w, FPGM_CLOSE);
             end
             else if ev.xclient.data.l[0] = netlayer.NetAtom[naWM_SYNC_REQUEST] then
             begin
-              w := TfpgX11Window(FindWindowByHandle(ev.xclient.window));
               w.FSyncValue.lo := ev.xclient.data.l[2];
               w.FSyncValue.hi := ev.xclient.data.l[3];
-              w.FHasSyncValue:=True;
+              w.FHasSyncValue := True;
             end;
           end
           { XDND protocol - XdndEnter }
-          else if Assigned(w) and (ev.xclient.message_type = XdndEnter) then
+          else if (ev.xclient.message_type = XdndEnter) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndEnter event received');
@@ -2120,7 +2145,7 @@ begin
             HandleDNDenter(w, ev.xclient.data.l[0], ev);
           end
           { XDND protocol - XdndPosition }
-          else if Assigned(w) and (ev.xclient.message_type = XdndPosition) then
+          else if (ev.xclient.message_type = XdndPosition) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndPosition event received');
@@ -2133,7 +2158,7 @@ begin
                 ev.xclient.data.l[3]);                      // timestamp
           end
           { XDND protocol - XdndStatus }
-          else if Assigned(w) and (ev.xclient.message_type = XdndStatus) then
+          else if (ev.xclient.message_type = XdndStatus) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndStatus event received');
@@ -2152,7 +2177,7 @@ begin
             end;
           end
           { XDND protocol - XdndLeave }
-          else if Assigned(w) and (ev.xclient.message_type = XdndLeave) then
+          else if (ev.xclient.message_type = XdndLeave) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndLeave event received');
@@ -2160,7 +2185,7 @@ begin
             HandleDNDleave(w, ev.xclient.data.l[0]);
           end
           { XDND protocol - XdndDrop }
-          else if Assigned(w) and (ev.xclient.message_type = XdndDrop) then
+          else if (ev.xclient.message_type = XdndDrop) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndDrop event received');
@@ -2170,7 +2195,7 @@ begin
             HandleDNDdrop(w, ev.xclient.data.l[0], ev.xclient.data.l[2]);
           end
           { XDND protocol - XdndFinished }
-          else if Assigned(w) and (ev.xclient.message_type = XdndFinished) then
+          else if (ev.xclient.message_type = XdndFinished) then
           begin
             {$IFDEF DNDDEBUG}
             DebugLn('ClientMessage.XdndFinished event received');
@@ -2267,6 +2292,12 @@ begin
           begin
             fpgClipboard.FClipboardText := '';
             fpgClipboard.DoLostSelection;
+            Exit;
+          end;
+          if ev.xselectionclear.selection = xia_selection then
+          begin
+            TfpgX11Selection(FSelection).FClipboardText := '';
+            TfpgX11Selection(FSelection).DoLostSelection;
             Exit;
           end;
         end;
@@ -3743,13 +3774,12 @@ begin
     // calculate a clipmask since we will use a new gc with none set.
     OriginalSize.SetRect(x,y,w,h);
     OriginalSize.IntersectRect(ClippedSize, FClipRect);
-    SourcePos := fpgPoint(xi+(ClippedSize.Left-OriginalSize.Left), yi+(ClippedSize.Top-OriginalSize.Top));
-
     // if the rect is empty (clipped out) then there is nothing to do
-    if ClippedSize.IsRectEmpty then
+    if FClipRectSet and ClippedSize.IsRectEmpty then
       Exit; // ==>
 
     // rendering the mask
+    SourcePos := fpgPoint(xi+(ClippedSize.Left-OriginalSize.Left), yi+(ClippedSize.Top-OriginalSize.Top));
     msk := XCreatePixmap(xapplication.display, XDefaultRootWindow(xapplication.display), w, h, 1);
     GcValues.foreground := 1;
     GcValues.background := 0;
@@ -3878,9 +3908,9 @@ begin
   Result := @FXimgMask;
 end;
 
-{ TfpgX11Clipboard }
+{ TfpgX11Selection }
 
-procedure TfpgX11Clipboard.SendClipboardToManager;
+procedure TfpgX11Selection.SendClipboardToManager;
 var
   ClipboardManager: TAtom;
   StartTime: DWord;
@@ -3890,10 +3920,9 @@ begin
     Exit; // ==>
 
   // check if the manager atom exists
-  ClipboardManager:= XInternAtom(xapplication.Display, 'CLIPBOARD_MANAGER', False);
+  ClipboardManager:= XInternAtom(xapplication.Display, @xsa_manager[1], False);
   if ClipboardManager = None then
     Exit; // ==>
-
   // check if a program has control of the manager atom
   if XGetSelectionOwner(xapplication.Display, ClipboardManager) = None then
     Exit; // ==>
@@ -3915,12 +3944,12 @@ begin
   until not FOwnsSelection or ((fpgGetTickCount - StartTime) > 3000); // allow 3 seconds for the clipboard to be read
 end;
 
-procedure TfpgX11Clipboard.DoLostSelection;
+procedure TfpgX11Selection.DoLostSelection;
 begin
   FOwnsSelection := False;
 end;
 
-procedure TfpgX11Clipboard.DoSetTargets(AWin: TWindow; AProperty: TAtom);
+procedure TfpgX11Selection.DoSetTargets(AWin: TWindow; AProperty: TAtom);
 const
   target_count = 3;
 var
@@ -3938,13 +3967,13 @@ begin
                   PropModeReplace, @targets[0], target_count);
 end;
 
-function TfpgX11Clipboard.DoGetText: TfpgString;
+function TfpgX11Selection.DoGetText: TfpgString;
 begin
   if FOwnsSelection then
     Exit(FClipboardText); // ==>
 
-  XConvertSelection(xapplication.Display, xapplication.xia_clipboard,
-      XA_STRING, xapplication.xia_clipboard, FClipboardWndHandle, 0);
+  XConvertSelection(xapplication.Display, xia_selection, XA_STRING,
+    xia_selection, FClipboardWndHandle, 0);
 
   FWaitingForSelection := True;
   fpgDeliverMessages; // delivering the remaining messages
@@ -3957,26 +3986,37 @@ begin
   Result := FClipboardText;
 end;
 
-procedure TfpgX11Clipboard.DoSetText(const AValue: TfpgString);
+procedure TfpgX11Selection.DoSetText(const AValue: TfpgString);
 begin
   FClipboardText := AValue;
-  XSetSelectionOwner(xapplication.Display, xapplication.xia_clipboard,
+  XSetSelectionOwner(xapplication.Display, xia_selection,
       FClipboardWndHandle, CurrentTime);
   DoSetTargets(FClipboardWndHandle, xapplication.xia_targets);
   FOwnsSelection := True;
 end;
 
-procedure TfpgX11Clipboard.InitClipboard;
+procedure TfpgX11Selection.InitClipboard;
 begin
   FWaitingForSelection := False;
+  xia_selection:=xapplication.xia_selection;
+  xsa_manager:='PRIMARY_MANAGER';
   FClipboardWndHandle := XCreateSimpleWindow(xapplication.Display,
       xapplication.RootWindow, 10, 10, 10, 10, 0, 0, 0);
 end;
 
-destructor TfpgX11Clipboard.Destroy;
+destructor TfpgX11Selection.Destroy;
 begin
   SendClipboardToManager;
   inherited Destroy;
+end;
+
+{ TfpgX11Clipboard }
+
+procedure TfpgX11Clipboard.InitClipboard;
+begin
+  inherited InitClipboard;
+  xia_selection:=xapplication.xia_clipboard;
+  xsa_manager:='CLIPBOARD_MANAGER';
 end;
 
 { TfpgX11FileList }

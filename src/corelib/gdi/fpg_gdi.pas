@@ -1,7 +1,7 @@
 {
     This unit is part of the fpGUI Toolkit project.
 
-    Copyright (c) 2006 - 2016 by Graeme Geldenhuys.
+    Copyright (c) 2006 - 2019 by Graeme Geldenhuys.
 
     See the file COPYING.modifiedLGPL, included in this distribution,
     for details about redistributing fpGUI.
@@ -77,7 +77,7 @@ type
     function    OpenFontByDesc(const desc: string): HFONT;
     property    Handle: HFONT read FFontData;
   public
-    constructor Create(const afontdesc: string);
+    constructor Create(const afontdesc: string); override;
     destructor  Destroy; override;
     function    HandleIsValid: boolean;
     function    GetAscent: integer; override;
@@ -221,6 +221,14 @@ type
   end;
 
 
+  TfpgGDISelection = class(TfpgClipboardBase)
+  protected
+    function    DoGetText: TfpgString; override;
+    procedure   DoSetText(const AValue: TfpgString); override; // NOP
+    procedure   InitClipboard; override; // NOP
+  end;
+
+
   TfpgGDIApplication = class(TfpgApplicationBase)
   private
     FDrag: TfpgGDIDrag;
@@ -257,10 +265,10 @@ type
     function    DoGetFontFaceList: TStringList; override;
     procedure   DoWaitWindowMessage(atimeoutms: integer); override;
     function    MessagesPending: boolean; override;
+    procedure   DoFlush; override;
   public
     constructor Create(const AParams: string); override;
     destructor  Destroy; override;
-    procedure   DoFlush;
     function    GetScreenWidth: TfpgCoord; override;
     function    GetScreenHeight: TfpgCoord; override;
     function    GetScreenPixelColor(APos: TPoint): TfpgColor; override;
@@ -268,7 +276,7 @@ type
     function    Screen_dpi_y: integer; override;
     function    Screen_dpi: integer; override;
     property    Display: HDC read FDisplay;
-  end;
+ end;
 
 
   TfpgGDIClipboard = class(TfpgClipboardBase)
@@ -355,13 +363,13 @@ type
   end;
 
 
-  TfpgGDISystemTrayIcon = class(TfpgComponent)
+  TfpgGDISystemTrayIcon = class(TfpgSystemTrayHandlerBase)
   public
     constructor Create(AOwner: TComponent); override;
-    procedure   Show;
-    procedure   Hide;
-    function    IsSystemTrayAvailable: boolean;
-    function    SupportsMessages: boolean;
+    procedure   Show; override;
+    procedure   Hide; override;
+    function    IsSystemTrayAvailable: boolean; override;
+    function    SupportsMessages: boolean; override;
   end;
 
 
@@ -1453,6 +1461,21 @@ begin
   inherited Destroy;
 end;
 
+function TfpgGDISelection.DoGetText: TfpgString;
+begin
+  result:=fpgClipboard.text;
+end;
+
+procedure TfpgGDISelection.DoSetText(const AValue: TfpgString);
+begin
+  { this procedure intentionally left blank. nothing to do on windoze }
+end;
+
+procedure TfpgGDISelection.InitClipboard;
+begin
+  { this procedure intentionally left blank. nothing to do on windoze }
+end;
+
 function TfpgGDIApplication.DoGetFontFaceList: TStringList;
 var
   LFont: TLogFont;
@@ -1555,6 +1578,7 @@ begin
   hcr_wait      := LoadCursor(0, IDC_WAIT);
   hcr_hand      := LoadCursor(0, IDC_HAND);
 
+  FSelection := TfpgGDISelection.create;
   FHiddenWindow := 0;
 
   ActivationHook := SetWindowsHookEx(WH_CBT, HOOKPROC(@fpgCBTProc), 0, GetCurrentThreadId);
@@ -1562,6 +1586,7 @@ begin
   FIsInitialized := True;
   wapplication   := TfpgApplication(self);
   WakeMainThread := @DoWakeMainThread;
+
 end;
 
 destructor TfpgGDIApplication.Destroy;
@@ -1570,6 +1595,7 @@ begin
   if Assigned(FDrag) then
     FDrag.Free;
   UnhookWindowsHookEx(ActivationHook);
+  FSelection.free;
   inherited Destroy;
 end;
 
