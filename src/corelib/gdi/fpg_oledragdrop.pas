@@ -1,7 +1,7 @@
 {
     This unit is part of the fpGUI Toolkit project.
 
-    Copyright (c) 2006 - 2015 by Graeme Geldenhuys.
+    Copyright (c) 2006 - 2020 by Graeme Geldenhuys.
 
     See the file COPYING.modifiedLGPL, included in this distribution,
     for details about redistributing fpGUI.
@@ -126,7 +126,11 @@ type
     function    GetDataHere(const formatetc: TFormatEtc; out medium: TStgMedium): HResult; stdcall;
     function    QueryGetData(const formatetc: TFormatEtc): HResult; stdcall;
     function    GetCanonicalFormatEtc(const formatetc: TFormatEtc; out formatetcOut: TFormatEtc): HResult; stdcall;
-    function    SetData(const formatetc: TFormatEtc; const medium: TStgMedium; fRelease: BOOL): HResult; stdcall;
+    {$IF FPC_FULLVERSION >= 30200}
+    function    SetData(const formatetc: TFormatEtc; var medium: TStgMedium; fRelease: bool): HResult; stdcall;
+    {$ELSE}
+    function    SetData(const formatetc: TFormatEtc; const medium: TStgMedium; fRelease: bool): HResult; stdcall;
+    {$ENDIF}
     function    EnumFormatEtc(dwDirection: DWORD; out enumFormatEtc: IEnumFormatEtc): HResult; stdcall;
     function    DAdvise(const formatetc: TFormatEtc; advf: DWORD; const advSink: IAdviseSink; out dwConnection: DWORD): HResult; stdcall;
     function    DUnadvise(dwConnection: DWORD): HResult; stdcall;
@@ -499,8 +503,7 @@ begin
 end;
 
 {$IF FPC_FULLVERSION>=20601}
-function TfpgOLEDropSource.QueryContinueDrag(fEscapePressed: BOOL;
-  grfKeyState: DWORD): HResult; Stdcall;
+function TfpgOLEDropSource.QueryContinueDrag(fEscapePressed: BOOL; grfKeyState: DWORD): HResult; Stdcall;
 {$ELSE}
 function TfpgOLEDropSource.QueryContinueDrag(fEscapePressed: BOOL; grfKeyState: LongInt): HResult;
 {$ENDIF}
@@ -629,8 +632,13 @@ begin
   end;
 end;
 
+{$IF FPC_FULLVERSION >= 30200}
 function TfpgOLEDataObject.SetData(const formatetc: TFormatEtc;
-  const medium: TStgMedium; fRelease: BOOL): HResult;
+  var medium: TStgMedium; fRelease: bool): HResult;
+{$ELSE}
+function TfpgOLEDataObject.SetData(const formatetc: TFormatEtc;
+  const medium: TStgMedium; fRelease: bool): HResult;
+{$ENDIF}
 begin
   Result := E_NOTIMPL;
 end;
@@ -739,11 +747,12 @@ end;
 
 procedure TfpgOLEStgMediumList.Notify(Ptr: Pointer; Action: TListNotification);
 begin
-  if Action = lnDeleted then begin
-    if PStgMedium(Ptr)^.hGlobal <> 0 then begin
+  if Action = lnDeleted then
+  begin
+    if PStgMedium(Ptr)^.hGlobal <> 0 then
+    begin
       GlobalFree(PStgMedium(Ptr)^.hGlobal);
     end;
-    Dispose(Ptr);
   end;
   inherited;
 end;
@@ -900,10 +909,10 @@ const
 var
   StgMedium: TStgMedium;
   DropHandle: HDROP;
-  EnumFormatEtc: IEnumFORMATETC;
-  FE: TFormatEtc;
-  FetchedCount: Longint;
-  FormatName: array[0..MAX_PATH] of Char;
+//  EnumFormatEtc: IEnumFORMATETC;
+//  FE: TFormatEtc;
+//  FetchedCount: Longint;
+//  FormatName: array[0..MAX_PATH] of Char;
   FileGroupDescriptor: PFileGroupDescriptorA;
   I, Count: Integer;
   FileDescriptor: TFileDescriptorA;
